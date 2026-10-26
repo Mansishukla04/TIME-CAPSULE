@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TIME CAPSULE - Dashboard</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span>🕰️</span>
+        <span>TIME CAPSULE</span>
+      </div>
+
+      <nav>
+        <button class="nav-item active" onclick="showSection('home')">
+          <span class="icon">🏠</span>
+          <span>Home</span>
+        </button>
+        <button class="nav-item" onclick="showSection('all')">
+          <span class="icon">🗂️</span>
+          <span>All Memories</span>
+        </button>
+        <button class="nav-item" onclick="showSection('favorites')">
+          <span class="icon">❤️</span>
+          <span>Favorites</span>
+        </button>
+        <button class="nav-item" onclick="showSection('trash')">
+          <span class="icon">🗑️</span>
+          <span>Trash</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="nav-item" onclick="logout()">
+          <span class="icon">🚪</span>
+          <span>Logout</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <div class="top-bar">
+        <h1 id="pageTitle">My Memory Vault</h1>
+        <div class="search-box">
+          <span>🔍</span>
+          <input type="text" id="searchInput" placeholder="Search memories..." oninput="handleSearch()">
+        </div>
+      </div>
+
+      <!-- HOME SECTION -->
+      <div id="homeSection">
+        <div class="quick-actions">
+          <button class="action-btn primary" onclick="openCreateModal()">
+            📁 Add Folder
+          </button>
+        </div>
+
+        <h2 class="section-title">Recent Folders</h2>
+        <div id="foldersGrid" class="folders-grid"></div>
+        <div id="emptyFolders" class="empty-state" style="display: none;">
+          <div class="emoji">📁</div>
+          <p>No folders yet. Create your first one!</p>
+        </div>
+      </div>
+
+      <!-- ALL / FAVORITES / TRASH SECTIONS -->
+      <div id="listSection" style="display: none;">
+        <div id="memoriesGrid" class="media-grid"></div>
+        <div id="emptyList" class="empty-state" style="display: none;">
+          <div class="emoji">📭</div>
+          <p id="emptyListText">Nothing here</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Create Folder Modal -->
+  <div id="createModal" class="modal">
+    <div class="modal-content">
+      <h3>Create New Folder</h3>
+      <div class="form-group">
+        <label>Folder Name</label>
+        <input type="text" id="folderName" placeholder="e.g. 2025-10-01 – College Day">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeCreateModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="createFolder()">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentSection = 'home';
+
+    // ========== LOAD FOLDERS ==========
+    async function loadFolders() {
+      try {
+        const res = await fetch('/api/folders');
+        if (!res.ok) {
+          window.location.href = '/login.html';
+          return;
+        }
+        const folders = await res.json();
+        const grid = document.getElementById('foldersGrid');
+        const empty = document.getElementById('emptyFolders');
+
+        if (folders.length === 0) {
+          grid.innerHTML = '';
+          empty.style.display = 'block';
+          return;
+        }
+
+        empty.style.display = 'none';
+        grid.innerHTML = folders.map(f => `
+          <div class="folder-card ${f.color || 'purple'}" onclick="openFolder(${f.id}, '${escapeHtml(f.name)}')">
+            <div class="actions">
+              <button class="icon-btn" onclick="event.stopPropagation(); toggleFavoriteFolder(${f.id})" title="Favorite">
+                ${f.is_favorite ? '❤️' : '🤍'}
+              </button>
+              <button class="icon-btn" onclick="event.stopPropagation(); deleteFolder(${f.id})" title="Delete">🗑️</button>
+            </div>
+            <div class="folder-icon">📁</div>
+            <h3>${escapeHtml(f.name)}</h3>
+            <div class="meta">${new Date(f.created_at).toLocaleDateString()}</div>
+          </div>
+        `).join('');
+      } catch (err) {
+        console.error(err);
+        window.location.href = '/login.html';
+      }
+    }
+
+    // ========== LOAD MEMORIES (All / Favorites / Trash) ==========
+    async function loadMemoriesList(type) {
+      let url = '/api/memories';
+      if (type === 'favorites') url += '?favorite=true';
+      if (type === 'trash') url += '?deleted=true';
+
+      try {
+        const res = await fetch(url);
+        const memories = await res.json();
+        const grid = document.getElementById('memoriesGrid');
+        const empty = document.getElementById('emptyList');
+        const emptyText = document.getElementById('emptyListText');
+
+        if (memories.length === 0) {
+          grid.innerHTML = '';
+          empty.style.display = 'block';
+          emptyText.textContent = type === 'trash' ? 'Trash is empty' : 
+                                  type === 'favorites' ? 'No favorites yet' : 'No memories yet';
+          return;
+        }
+
+        empty.style.display = 'none';
+        grid.innerHTML = memories.map(m => renderMemoryCard(m, type === 'trash')).join('');
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    function renderMemoryCard(m, isTrash = false) {
+      let preview = '';
+      if (m.type === 'photo' && m.file_path) {
+        preview = `<img class="preview" src="${m.file_path}" alt="">`;
+      } else if (m.type === 'video' && m.file_path) {
+        preview = `<video class="preview" src="${m.file_path}"></video>`;
+      } else if (m.type === 'voice') {
+        preview = `<div class="preview">🎤</div>`;
+      } else {
+        preview = `<div class="preview">📝</div>`;
+      }
+
+      return `
+        <div class="media-card">
+          <div class="card-actions">
+            ${isTrash 
+              ? `<button class="icon-btn" onclick="restoreMemory(${m.id})">♻️</button>`
+              : `<button class="icon-btn" onclick="toggleFavoriteMemory(${m.id})">${m.is_favorite ? '❤️' : '🤍'}</button>
+                 <button class="icon-btn" onclick="deleteMemory(${m.id})">🗑️</button>`
+            }
+          </div>
+          ${preview}
+          <div class="info">
+            <div class="name">${escapeHtml(m.title || m.type)}</div>
+            <div class="time">${new Date(m.created_at).toLocaleDateString()}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    // ========== SECTION SWITCHING ==========
+    function showSection(section) {
+      currentSection = section;
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+
+      document.getElementById('homeSection').style.display = section === 'home' ? 'block' : 'none';
+      document.getElementById('listSection').style.display = section === 'home' ? 'none' : 'block';
+
+      const titles = {
+        home: 'My Memory Vault',
+        all: 'All Memories',
+        favorites: 'Favorites',
+        trash: 'Trash'
+      };
+      document.getElementById('pageTitle').textContent = titles[section];
+
+      if (section === 'home') {
+        loadFolders();
+      } else {
+        loadMemoriesList(section);
+      }
+    }
+
+    // ========== ACTIONS ==========
+    function openFolder(id, name) {
+      window.location.href = `/folder.html?id=${id}&name=${encodeURIComponent(name)}`;
+    }
+
+    function openCreateModal() {
+      document.getElementById('createModal').classList.add('show');
+      document.getElementById('folderName').value = '';
+      document.getElementById('folderName').focus();
+    }
+
+    function closeCreateModal() {
+      document.getElementById('createModal').classList.remove('show');
+    }
+
+    async function createFolder() {
+      const name = document.getElementById('folderName').value.trim();
+      if (!name) return alert('Please enter a folder name');
+
+      const res = await fetch('/api/folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, parent_id: null })
+      });
+      const data = await res.json();
+      if (data.success) {
+        closeCreateModal();
+        loadFolders();
+      }
+    }
+
+    async function deleteFolder(id) {
+      if (!confirm('Move this folder to Trash?')) return;
+      await fetch(`/api/folders/${id}`, { method: 'DELETE' });
+      loadFolders();
+    }
+
+    async function toggleFavoriteFolder(id) {
+      await fetch(`/api/folders/${id}/favorite`, { method: 'POST' });
+      loadFolders();
+    }
+
+    async function deleteMemory(id) {
+      if (!confirm('Move to Trash?')) return;
+      await fetch(`/api/memories/${id}`, { method: 'DELETE' });
+      loadMemoriesList(currentSection);
+    }
+
+    async function restoreMemory(id) {
+      await fetch(`/api/memories/${id}/restore`, { method: 'POST' });
+      loadMemoriesList('trash');
+    }
+
+    async function toggleFavoriteMemory(id) {
+      await fetch(`/api/memories/${id}/favorite`, { method: 'POST' });
+      loadMemoriesList(currentSection);
+    }
+
+    async function logout() {
+      await fetch('/api/logout', { method: 'POST' });
+      window.location.href = '/login.html';
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function handleSearch() {
+      // Simple client-side search can be added later
+    }
+
+    // Modal close on outside click
+    document.getElementById('createModal').addEventListener('click', e => {
+      if (e.target.id === 'createModal') closeCreateModal();
+    });
+
+    document.getElementById('folderName').addEventListener('keypress', e => {
+      if (e.key === 'Enter') createFolder();
+    });
+
+    // Init
+    loadFolders();
+  </script>
+</body>
+</html>

@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TIME CAPSULE - Folder</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span>🕰️</span>
+        <span>TIME CAPSULE</span>
+      </div>
+
+      <nav>
+        <button class="nav-item" onclick="goHome()">
+          <span class="icon">🏠</span>
+          <span>Home</span>
+        </button>
+        <button class="nav-item" onclick="window.location.href='/dashboard.html'">
+          <span class="icon">🗂️</span>
+          <span>All Memories</span>
+        </button>
+        <button class="nav-item" onclick="window.location.href='/dashboard.html'">
+          <span class="icon">❤️</span>
+          <span>Favorites</span>
+        </button>
+        <button class="nav-item" onclick="window.location.href='/dashboard.html'">
+          <span class="icon">🗑️</span>
+          <span>Trash</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="nav-item" onclick="logout()">
+          <span class="icon">🚪</span>
+          <span>Logout</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <div class="folder-header">
+        <button class="back-btn" onclick="goBack()">←</button>
+        <div>
+          <h1 id="folderTitle">Folder</h1>
+          <div class="subtitle" id="folderSubtitle">Your memories</div>
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="quick-actions">
+        <button class="action-btn primary" onclick="openCreateSubfolderModal()">📁 New Subfolder</button>
+        <button class="action-btn" onclick="document.getElementById('addBox').scrollIntoView({behavior:'smooth'})">➕ Add Memory</button>
+      </div>
+
+      <!-- Subfolders -->
+      <h2 class="section-title">Subfolders</h2>
+      <div id="subfoldersGrid" class="folders-grid"></div>
+      <div id="emptySubfolders" class="empty-state" style="display:none; padding: 20px;">
+        <p>No subfolders yet</p>
+      </div>
+
+      <!-- Add Memory Box -->
+      <div class="add-box" id="addBox">
+        <h3>Add New Memory</h3>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Type</label>
+            <select id="memoryType" onchange="onTypeChange()">
+              <option value="photo">📷 Photo</option>
+              <option value="text">📝 Text Note</option>
+              <option value="video">🎬 Video</option>
+              <option value="voice">🎤 Voice</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Title (optional)</label>
+            <input type="text" id="memoryTitle" placeholder="Give it a title...">
+          </div>
+        </div>
+
+        <div id="textSection" class="form-group" style="display:none;">
+          <label>Write your note</label>
+          <textarea id="memoryContent" placeholder="Type your memory here..."></textarea>
+        </div>
+
+        <div id="fileSection" class="form-group">
+          <label id="fileLabel">Upload Photo</label>
+          <input type="file" id="memoryFile" accept="image/*">
+        </div>
+
+        <div id="voiceSection" class="record-box" style="display:none;">
+          <p style="font-size:13px; margin-bottom:10px; color:#6b7280;">Record live or upload audio file above</p>
+          <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+            <button type="button" id="recordBtn" class="btn btn-danger" onclick="toggleRecording()">🎤 Start Recording</button>
+            <span id="recordingStatus"></span>
+            <audio id="audioPreview" controls style="display:none; max-width:240px;"></audio>
+          </div>
+        </div>
+
+        <button class="btn btn-primary" style="margin-top:16px;" onclick="saveMemory()">Save Memory</button>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tabs" style="margin-top: 10px;">
+        <button class="tab active" data-type="all" onclick="filterMemories('all')">All</button>
+        <button class="tab" data-type="photo" onclick="filterMemories('photo')">Photos</button>
+        <button class="tab" data-type="video" onclick="filterMemories('video')">Videos</button>
+        <button class="tab" data-type="text" onclick="filterMemories('text')">Text</button>
+        <button class="tab" data-type="voice" onclick="filterMemories('voice')">Voice</button>
+      </div>
+
+      <!-- Memories Grid -->
+      <div id="memoriesGrid" class="media-grid"></div>
+      <div id="emptyMemories" class="empty-state" style="display:none;">
+        <div class="emoji">📝</div>
+        <p>No memories yet. Add your first one above!</p>
+      </div>
+    </main>
+  </div>
+
+  <!-- Create Subfolder Modal -->
+  <div id="createSubfolderModal" class="modal">
+    <div class="modal-content">
+      <h3>Create Subfolder</h3>
+      <div class="form-group">
+        <label>Subfolder Name</label>
+        <input type="text" id="subfolderName" placeholder="e.g. Trip Photos">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeCreateSubfolderModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="createSubfolder()">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const folderId = urlParams.get('id');
+    const folderName = urlParams.get('name') || 'Folder';
+
+    document.getElementById('folderTitle').textContent = folderName;
+    document.getElementById('folderSubtitle').textContent = 'A collection of moments';
+
+    if (!folderId) window.location.href = '/dashboard.html';
+
+    let currentFilter = 'all';
+    let recordedBlob = null;
+    let mediaRecorder, audioChunks = [], isRecording = false;
+
+    // ========== TYPE CHANGE ==========
+    function onTypeChange() {
+      const type = document.getElementById('memoryType').value;
+      const textSection = document.getElementById('textSection');
+      const fileSection = document.getElementById('fileSection');
+      const voiceSection = document.getElementById('voiceSection');
+      const fileInput = document.getElementById('memoryFile');
+      const fileLabel = document.getElementById('fileLabel');
+
+      textSection.style.display = 'none';
+      voiceSection.style.display = 'none';
+      fileSection.style.display = 'block';
+      recordedBlob = null;
+      document.getElementById('audioPreview').style.display = 'none';
+      document.getElementById('recordingStatus').textContent = '';
+      fileInput.value = '';
+
+      if (type === 'photo') {
+        fileLabel.textContent = 'Upload Photo';
+        fileInput.accept = 'image/*';
+      } else if (type === 'video') {
+        fileLabel.textContent = 'Upload Video';
+        fileInput.accept = 'video/*';
+      } else if (type === 'text') {
+        textSection.style.display = 'block';
+        fileLabel.textContent = 'Or upload a .txt file (optional)';
+        fileInput.accept = '.txt,text/plain';
+      } else if (type === 'voice') {
+        voiceSection.style.display = 'block';
+        fileLabel.textContent = 'Or upload an audio file';
+        fileInput.accept = 'audio/*';
+      }
+    }
+
+    // ========== VOICE RECORDING ==========
+    async function toggleRecording() {
+      const btn = document.getElementById('recordBtn');
+      const status = document.getElementById('recordingStatus');
+      const preview = document.getElementById('audioPreview');
+
+      if (!isRecording) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream);
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+          mediaRecorder.onstop = () => {
+            recordedBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            preview.src = URL.createObjectURL(recordedBlob);
+            preview.style.display = 'block';
+            status.textContent = 'Ready ✓';
+            stream.getTracks().forEach(t => t.stop());
+          };
+
+          mediaRecorder.start();
+          isRecording = true;
+          btn.textContent = '⏹ Stop';
+          status.textContent = 'Recording...';
+        } catch (err) {
+          alert('Microphone access denied');
+        }
+      } else {
+        mediaRecorder.stop();
+        isRecording = false;
+        btn.textContent = '🎤 Start Recording';
+      }
+    }
+
+    // ========== SAVE MEMORY ==========
+    async function saveMemory() {
+      const type = document.getElementById('memoryType').value;
+      const title = document.getElementById('memoryTitle').value.trim();
+      const content = document.getElementById('memoryContent').value.trim();
+      const fileInput = document.getElementById('memoryFile');
+
+      const formData = new FormData();
+      formData.append('folder_id', folderId);
+      formData.append('type', type);
+      formData.append('title', title);
+      formData.append('content', content);
+
+      if (type === 'voice' && recordedBlob) {
+        formData.append('file', recordedBlob, 'recording.webm');
+      } else if (fileInput.files[0]) {
+        formData.append('file', fileInput.files[0]);
+      }
+
+      if ((type === 'photo' || type === 'video') && !fileInput.files[0]) {
+        return alert('Please select a file');
+      }
+      if (type === 'text' && !content && !fileInput.files[0]) {
+        return alert('Please write something or upload a file');
+      }
+      if (type === 'voice' && !recordedBlob && !fileInput.files[0]) {
+        return alert('Please record or upload audio');
+      }
+
+      try {
+        const res = await fetch('/api/memories', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.success) {
+          document.getElementById('memoryTitle').value = '';
+          document.getElementById('memoryContent').value = '';
+          document.getElementById('memoryFile').value = '';
+          recordedBlob = null;
+          document.getElementById('audioPreview').style.display = 'none';
+          document.getElementById('recordingStatus').textContent = '';
+          document.getElementById('memoryType').value = 'photo';
+          onTypeChange();
+          loadMemories();
+          alert('Memory saved!');
+        } else {
+          alert(data.message || 'Failed to save');
+        }
+      } catch (err) {
+        alert('Error saving memory');
+      }
+    }
+
+    // ========== LOAD SUBFOLDERS ==========
+    async function loadSubfolders() {
+      const res = await fetch(`/api/folders?parent_id=${folderId}`);
+      const folders = await res.json();
+      const grid = document.getElementById('subfoldersGrid');
+      const empty = document.getElementById('emptySubfolders');
+
+      if (folders.length === 0) {
+        grid.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+      }
+
+      empty.style.display = 'none';
+      grid.innerHTML = folders.map(f => `
+        <div class="folder-card ${f.color || 'purple'}" onclick="openFolder(${f.id}, '${escapeHtml(f.name)}')">
+          <div class="actions">
+            <button class="icon-btn" onclick="event.stopPropagation(); deleteFolder(${f.id})">🗑️</button>
+          </div>
+          <div class="folder-icon">📁</div>
+          <h3>${escapeHtml(f.name)}</h3>
+          <div class="meta">${new Date(f.created_at).toLocaleDateString()}</div>
+        </div>
+      `).join('');
+    }
+
+    // ========== LOAD MEMORIES ==========
+    async function loadMemories() {
+      const typeParam = currentFilter === 'all' ? '' : `?type=${currentFilter}`;
+      const res = await fetch(`/api/folders/${folderId}/memories${typeParam}`);
+      const memories = await res.json();
+      const grid = document.getElementById('memoriesGrid');
+      const empty = document.getElementById('emptyMemories');
+
+      if (memories.length === 0) {
+        grid.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+      }
+
+      empty.style.display = 'none';
+      grid.innerHTML = memories.map(m => {
+        let preview = '';
+        if (m.type === 'photo' && m.file_path) {
+          preview = `<img class="preview" src="${m.file_path}" alt="">`;
+        } else if (m.type === 'video' && m.file_path) {
+          preview = `<video class="preview" src="${m.file_path}"></video>`;
+        } else if (m.type === 'voice') {
+          preview = `<div class="preview">🎤</div>`;
+        } else {
+          preview = `<div class="preview">📝</div>`;
+        }
+
+        return `
+          <div class="media-card">
+            <div class="card-actions">
+              <button class="icon-btn" onclick="toggleFavorite(${m.id})">${m.is_favorite ? '❤️' : '🤍'}</button>
+              <button class="icon-btn" onclick="deleteMemory(${m.id})">🗑️</button>
+            </div>
+            ${preview}
+            <div class="info">
+              <div class="name">${escapeHtml(m.title || m.type)}</div>
+              <div class="time">${new Date(m.created_at).toLocaleString()}</div>
+              ${m.type === 'voice' && m.file_path ? `<audio src="${m.file_path}" controls style="width:100%; margin-top:6px;"></audio>` : ''}
+              ${m.type === 'text' && m.content ? `<p style="font-size:12px; margin-top:4px;">${escapeHtml(m.content.substring(0, 80))}</p>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function filterMemories(type) {
+      currentFilter = type;
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelector(`.tab[data-type="${type}"]`).classList.add('active');
+      loadMemories();
+    }
+
+    // ========== ACTIONS ==========
+    function openFolder(id, name) {
+      window.location.href = `/folder.html?id=${id}&name=${encodeURIComponent(name)}`;
+    }
+
+    function openCreateSubfolderModal() {
+      document.getElementById('createSubfolderModal').classList.add('show');
+      document.getElementById('subfolderName').value = '';
+      document.getElementById('subfolderName').focus();
+    }
+
+    function closeCreateSubfolderModal() {
+      document.getElementById('createSubfolderModal').classList.remove('show');
+    }
+
+    async function createSubfolder() {
+      const name = document.getElementById('subfolderName').value.trim();
+      if (!name) return alert('Enter a name');
+
+      const res = await fetch('/api/folders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, parent_id: folderId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        closeCreateSubfolderModal();
+        loadSubfolders();
+      }
+    }
+
+    async function deleteFolder(id) {
+      if (!confirm('Move this subfolder to Trash?')) return;
+      await fetch(`/api/folders/${id}`, { method: 'DELETE' });
+      loadSubfolders();
+    }
+
+    async function deleteMemory(id) {
+      if (!confirm('Move to Trash?')) return;
+      await fetch(`/api/memories/${id}`, { method: 'DELETE' });
+      loadMemories();
+    }
+
+    async function toggleFavorite(id) {
+      await fetch(`/api/memories/${id}/favorite`, { method: 'POST' });
+      loadMemories();
+    }
+
+    function goBack() {
+      window.history.back();
+    }
+
+    function goHome() {
+      window.location.href = '/dashboard.html';
+    }
+
+    async function logout() {
+      await fetch('/api/logout', { method: 'POST' });
+      window.location.href = '/login.html';
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text || '';
+      return div.innerHTML;
+    }
+
+    // Modal events
+    document.getElementById('createSubfolderModal').addEventListener('click', e => {
+      if (e.target.id === 'createSubfolderModal') closeCreateSubfolderModal();
+    });
+    document.getElementById('subfolderName').addEventListener('keypress', e => {
+      if (e.key === 'Enter') createSubfolder();
+    });
+
+    // Init
+    onTypeChange();
+    loadSubfolders();
+    loadMemories();
+  </script>
+</body>
+</html>

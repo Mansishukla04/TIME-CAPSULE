@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TIME CAPSULE - Login</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="login-body">
+  <div class="login-card">
+    <div class="logo">🕰️</div>
+    <h1>TIME CAPSULE</h1>
+    <p class="subtitle">my personal memory vault</p>
+
+    <form id="loginForm">
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="Enter your password" required autofocus>
+      </div>
+
+      <button type="submit" class="btn-login">Enter</button>
+      <p id="errorMsg" class="error"></p>
+    </form>
+  </div>
+
+  <script>
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = document.getElementById('password').value;
+      const errorMsg = document.getElementById('errorMsg');
+
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password })
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          window.location.href = '/dashboard.html';
+        } else {
+          errorMsg.textContent = data.message || 'Wrong password';
+        }
+      } catch (err) {
+        errorMsg.textContent = 'Something went wrong. Try again.';
+      }
+    });
+  </script>
+</body>
+</html>
