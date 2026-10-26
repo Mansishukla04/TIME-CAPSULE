@@ -8,7 +8,7 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+
 
 // Create database
 const db = new Database('database.db');
@@ -74,7 +74,7 @@ function requireLogin(req, res, next) {
   }
 }
 
-// ========== ROUTES ==========
+
 
 // ========== ROUTES ==========
 
@@ -261,6 +261,9 @@ app.get('/api/memories', requireLogin, (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`TIME CAPSULE running at http://localhost:${PORT}`);
+
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`TIME CAPSULE running on port ${PORT}`);
 });
