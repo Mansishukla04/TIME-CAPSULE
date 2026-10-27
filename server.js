@@ -1,50 +1,18 @@
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
-const Database = require('better-sqlite3');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 const bcrypt = require('bcryptjs');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-
-// Create database
-const db = new Database('database.db');
-
-// Create tables if they don't exist
-db.exec(`
-  CREATE TABLE IF NOT EXISTS folders (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    color TEXT DEFAULT 'purple',
-    is_favorite INTEGER DEFAULT 0,
-    is_deleted INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS memories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    folder_id INTEGER NOT NULL,
-    type TEXT NOT NULL,
-    title TEXT,
-    content TEXT,
-    file_path TEXT,
-    is_favorite INTEGER DEFAULT 0,
-    is_deleted INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE
-  );
-`);
-
 
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
-app.use('/uploads', express.static('uploads'));
 
 app.use(session({
   secret: process.env.SESSION_SECRET || 'fallbacksecret',
@@ -53,49 +21,140 @@ app.use(session({
   cookie: { maxAge: 24 * 60 * 60 * 1000 } // 1 day
 }));
 
-// File upload setup
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, 'uploads/');
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname);
-    cb(null, uniqueName);
-  }
-});
-const upload = multer({ storage });
+// Initialize Supabase using environment variables
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_ANON_KEY
+);
+
+// File upload setup (Memory storage for Supabase)
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Auth middleware
 function requireLogin(req, res, next) {
-  if (req.session.loggedIn) {
+  if (req.session.userId) {
     next();
   } else {
-    res.redirect('/login.html');
+    res.status(401).json({ success: false, message: 'Not logged in' });
   }
 }
 
+// ==========================================
+// ROUTES
+// ==========================================
 
-
-// ========== ROUTES ==========
-
-// ========== ROUTES ==========
-
+// Root redirect
 app.get('/', (req, res) => {
-  if (req.session.loggedIn) {
+  if (req.session.userId) {
     res.redirect('/dashboard.html');
   } else {
     res.redirect('/login.html');
   }
 });
 
-// Login
-app.post('/api/login', (req, res) => {
-  const { password } = req.body;
-  if (password === process.env.PASSWORD) {
+// Fetch Capsules
+app.get('/api/capsules', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('capsules')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.status(200).json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Create Capsule (with Supabase Storage upload)
+app.post('/api/capsules', upload.single('mediaFile'), async (req, res) => {
+  try {
+    const { text_content, unlock_at } = req.body;
+    let mediaUrl = null;
+
+    if (req.file) {
+      const fileName = `${Date.now()}-${req.file.originalname}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from('capsule-media')
+        .upload(fileName, req.file.buffer, {
+          contentType: req.file.mimetype,
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage
+        .from('capsule-media')
+        .getPublicUrl(fileName);
+
+      mediaUrl = publicUrlData.publicUrl;
+    }
+
+    const { data: dbData, error: dbError } = await supabase
+      .from('capsules')
+      .insert([
+        { 
+          text_content: text_content, 
+          media_url: mediaUrl, 
+          unlock_at: unlock_at 
+        }
+      ])
+      .select();
+
+    if (dbError) throw dbError;
+
+    res.status(200).json({ success: true, data: dbData });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Login / Register with Email + Password
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !password || password.length < 4) {
+      return res.json({ success: false, message: 'Email and password (min 4 characters) required' });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+
+    // Check if user already exists in Supabase
+    let { data: users, error: fetchError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('email', cleanEmail);
+
+    if (fetchError) throw fetchError;
+
+    let user = users && users.length > 0 ? users[0] : null;
+
+    if (user) {
+      const match = bcrypt.compareSync(password, user.password_hash);
+      if (!match) {
+        return res.json({ success: false, message: 'Wrong email or password' });
+      }
+    } else {
+      const passwordHash = bcrypt.hashSync(password, 8);
+      const { data: newUser, error: insertError } = await supabase
+        .from('users')
+        .insert([{ email: cleanEmail, password_hash: passwordHash }])
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+      user = newUser;
+    }
+
+    req.session.userId = user.id;
     req.session.loggedIn = true;
     res.json({ success: true });
-  } else {
-    res.json({ success: false, message: 'Wrong password' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -107,144 +166,275 @@ app.post('/api/logout', (req, res) => {
 
 // ========== FOLDERS ==========
 
-// Get all folders (only root, no nesting)
-app.get('/api/folders', requireLogin, (req, res) => {
-  const showDeleted = req.query.deleted === 'true';
-  let folders;
+app.get('/api/folders', requireLogin, async (req, res) => {
+  try {
+    const showDeleted = req.query.deleted === 'true';
+    let query = supabase
+      .from('folders')
+      .select('*')
+      .eq('user_id', req.session.userId)
+      .eq('is_deleted', showDeleted ? 1 : 0)
+      .order('created_at', { ascending: false });
 
-  if (showDeleted) {
-    folders = db.prepare('SELECT * FROM folders WHERE is_deleted = 1 ORDER BY created_at DESC').all();
-  } else {
-    folders = db.prepare('SELECT * FROM folders WHERE is_deleted = 0 ORDER BY created_at DESC').all();
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  res.json(folders);
 });
 
-// Create folder
-app.post('/api/folders', requireLogin, (req, res) => {
-  const { name, color } = req.body;
-  if (!name || name.trim() === '') {
-    return res.json({ success: false, message: 'Folder name required' });
+app.post('/api/folders', requireLogin, async (req, res) => {
+  try {
+    const { name, color } = req.body;
+    if (!name || name.trim() === '') {
+      return res.json({ success: false, message: 'Folder name required' });
+    }
+
+    const colors = ['purple', 'pink', 'blue', 'green', 'orange', 'teal'];
+    const finalColor = color || colors[Math.floor(Math.random() * colors.length)];
+
+    const { data, error } = await supabase
+      .from('folders')
+      .insert([{ user_id: req.session.userId, name: name.trim(), color: finalColor }])
+      .select()
+      .single();
+
+    if (error) throw error;
+    res.json({ success: true, id: data.id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  const colors = ['purple', 'pink', 'blue', 'green', 'orange', 'teal'];
-  const finalColor = color || colors[Math.floor(Math.random() * colors.length)];
-
-  const result = db.prepare('INSERT INTO folders (name, color) VALUES (?, ?)').run(name.trim(), finalColor);
-  res.json({ success: true, id: result.lastInsertRowid });
 });
 
-// Soft delete folder
-app.delete('/api/folders/:id', requireLogin, (req, res) => {
-  db.prepare('UPDATE folders SET is_deleted = 1 WHERE id = ?').run(req.params.id);
-  res.json({ success: true });
+app.delete('/api/folders/:id', requireLogin, async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('folders')
+      .update({ is_deleted: 1 })
+      .eq('id', req.params.id)
+      .eq('user_id', req.session.userId);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Restore folder
-app.post('/api/folders/:id/restore', requireLogin, (req, res) => {
-  db.prepare('UPDATE folders SET is_deleted = 0 WHERE id = ?').run(req.params.id);
-  res.json({ success: true });
+app.post('/api/folders/:id/restore', requireLogin, async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('folders')
+      .update({ is_deleted: 0 })
+      .eq('id', req.params.id)
+      .eq('user_id', req.session.userId);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Toggle favorite folder
-app.post('/api/folders/:id/favorite', requireLogin, (req, res) => {
-  const folder = db.prepare('SELECT is_favorite FROM folders WHERE id = ?').get(req.params.id);
-  const newValue = folder.is_favorite ? 0 : 1;
-  db.prepare('UPDATE folders SET is_favorite = ? WHERE id = ?').run(newValue, req.params.id);
-  res.json({ success: true, is_favorite: newValue });
+app.post('/api/folders/:id/favorite', requireLogin, async (req, res) => {
+  try {
+    const { data: folder, error: fetchErr } = await supabase
+      .from('folders')
+      .select('is_favorite')
+      .eq('id', req.params.id)
+      .eq('user_id', req.session.userId)
+      .single();
+
+    if (fetchErr || !folder) return res.json({ success: false });
+
+    const newValue = folder.is_favorite ? 0 : 1;
+    const { error: updateErr } = await supabase
+      .from('folders')
+      .update({ is_favorite: newValue })
+      .eq('id', req.params.id)
+      .eq('user_id', req.session.userId);
+
+    if (updateErr) throw updateErr;
+    res.json({ success: true, is_favorite: newValue });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ========== MEMORIES ==========
 
-// Get memories of a folder
-app.get('/api/folders/:id/memories', requireLogin, (req, res) => {
-  const type = req.query.type;
-  let memories;
+app.get('/api/folders/:id/memories', requireLogin, async (req, res) => {
+  try {
+    const type = req.query.type;
+    let query = supabase
+      .from('memories')
+      .select('*')
+      .eq('folder_id', req.params.id)
+      .eq('user_id', req.session.userId)
+      .eq('is_deleted', 0)
+      .order('created_at', { ascending: false });
 
-  if (type && type !== 'all') {
-    memories = db.prepare(`
-      SELECT * FROM memories 
-      WHERE folder_id = ? AND type = ? AND is_deleted = 0 
-      ORDER BY created_at DESC
-    `).all(req.params.id, type);
-  } else {
-    memories = db.prepare(`
-      SELECT * FROM memories 
-      WHERE folder_id = ? AND is_deleted = 0 
-      ORDER BY created_at DESC
-    `).all(req.params.id);
+    if (type && type !== 'all') {
+      query = query.eq('type', type);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  res.json(memories);
 });
 
-// Add memory
-app.post('/api/memories', requireLogin, upload.single('file'), (req, res) => {
-  const { folder_id, type, title, content } = req.body;
-  let file_path = null;
+app.post('/api/memories', requireLogin, upload.single('file'), async (req, res) => {
+  try {
+    const { folder_id, type, title, content } = req.body;
+    let filePath = null;
 
-  if (req.file) {
-    file_path = '/uploads/' + req.file.filename;
+    if (!folder_id || !type) {
+      return res.json({ success: false, message: 'Missing required fields' });
+    }
+
+    const { data: folder, error: folderErr } = await supabase
+      .from('folders')
+      .select('id')
+      .eq('id', folder_id)
+      .eq('user_id', req.session.userId)
+      .single();
+
+    if (folderErr || !folder) {
+      return res.json({ success: false, message: 'Folder not found' });
+    }
+
+    if (req.file) {
+      const fileName = `${Date.now()}-${req.file.originalname}`;
+      const { error: uploadError } = await supabase.storage
+        .from('capsule-media')
+        .upload(fileName, req.file.buffer, {
+          contentType: req.file.mimetype,
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage
+        .from('capsule-media')
+        .getPublicUrl(fileName);
+
+      filePath = publicUrlData.publicUrl;
+    }
+
+    const { data: result, error: insertErr } = await supabase
+      .from('memories')
+      .insert([{
+        folder_id: folder_id,
+        user_id: req.session.userId,
+        type: type,
+        title: title || null,
+        content: content || null,
+        file_path: filePath
+      }])
+      .select()
+      .single();
+
+    if (insertErr) throw insertErr;
+    res.json({ success: true, id: result.id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
   }
-
-  if (!folder_id || !type) {
-    return res.json({ success: false, message: 'Missing required fields' });
-  }
-
-  const result = db.prepare(`
-    INSERT INTO memories (folder_id, type, title, content, file_path)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(folder_id, type, title || null, content || null, file_path);
-
-  res.json({ success: true, id: result.lastInsertRowid });
 });
 
-// Soft delete memory
-app.delete('/api/memories/:id', requireLogin, (req, res) => {
-  db.prepare('UPDATE memories SET is_deleted = 1 WHERE id = ?').run(req.params.id);
-  res.json({ success: true });
+app.delete('/api/memories/:id', requireLogin, async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('memories')
+      .update({ is_deleted: 1 })
+      .eq('id', req.params.id)
+      .eq('user_id', req.session.userId);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Restore memory
-app.post('/api/memories/:id/restore', requireLogin, (req, res) => {
-  db.prepare('UPDATE memories SET is_deleted = 0 WHERE id = ?').run(req.params.id);
-  res.json({ success: true });
+app.post('/api/memories/:id/restore', requireLogin, async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from('memories')
+      .update({ is_deleted: 0 })
+      .eq('id', req.params.id)
+      .eq('user_id', req.session.userId);
+
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Toggle favorite memory
-app.post('/api/memories/:id/favorite', requireLogin, (req, res) => {
-  const memory = db.prepare('SELECT is_favorite FROM memories WHERE id = ?').get(req.params.id);
-  const newValue = memory.is_favorite ? 0 : 1;
-  db.prepare('UPDATE memories SET is_favorite = ? WHERE id = ?').run(newValue, req.params.id);
-  res.json({ success: true, is_favorite: newValue });
+app.post('/api/memories/:id/favorite', requireLogin, async (req, res) => {
+  try {
+    const { data: memory, error: fetchErr } = await supabase
+      .from('memories')
+      .select('is_favorite')
+      .eq('id', req.params.id)
+      .eq('user_id', req.session.userId)
+      .single();
+
+    if (fetchErr || !memory) return res.json({ success: false });
+
+    const newValue = memory.is_favorite ? 0 : 1;
+    const { error: updateErr } = await supabase
+      .from('memories')
+      .update({ is_favorite: newValue })
+      .eq('id', req.params.id)
+      .eq('user_id', req.session.userId);
+
+    if (updateErr) throw updateErr;
+    res.json({ success: true, is_favorite: newValue });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// Get all memories (for All / Favorites / Trash)
-app.get('/api/memories', requireLogin, (req, res) => {
-  const type = req.query.type;
-  const favorite = req.query.favorite === 'true';
-  const deleted = req.query.deleted === 'true';
+app.get('/api/memories', requireLogin, async (req, res) => {
+  try {
+    const type = req.query.type;
+    const favorite = req.query.favorite === 'true';
+    const deleted = req.query.deleted === 'true';
 
-  let query = 'SELECT m.*, f.name as folder_name FROM memories m LEFT JOIN folders f ON m.folder_id = f.id WHERE 1=1';
-  const params = [];
+    let query = supabase
+      .from('memories')
+      .select('*, folders(name)')
+      .eq('user_id', req.session.userId)
+      .eq('is_deleted', deleted ? 1 : 0);
 
-  if (deleted) {
-    query += ' AND m.is_deleted = 1';
-  } else {
-    query += ' AND m.is_deleted = 0';
+    if (favorite) {
+      query = query.eq('is_favorite', 1);
+    }
+
+    if (type && type !== 'all') {
+      query = query.eq('type', type);
+    }
+
+    query = query.order('created_at', { ascending: false });
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    const formattedData = data.map(m => ({
+      ...m,
+      folder_name: m.folders ? m.folders.name : null
+    }));
+
+    res.json(formattedData);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
-
-  if (favorite) {
-    query += ' AND m.is_favorite = 1';
-  }
-
-  if (type && type !== 'all') {
-    query += ' AND m.type = ?';
-    params.push(type);
-  }
-
-  query += ' ORDER BY m.created_at DESC';
-  const memories = db.prepare(query).all(...params);
-  res.json(memories);
 });
 
 // Start server

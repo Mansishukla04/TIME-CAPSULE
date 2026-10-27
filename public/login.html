@@ -10,22 +10,31 @@
   <div class="login-card">
     <div class="logo">🕰️</div>
     <h1>TIME CAPSULE</h1>
-    <p class="subtitle">my personal memory vault</p>
+    <p class="subtitle">Your personal memory vault</p>
 
     <form id="loginForm">
       <div class="form-group">
-        <label for="password">Password</label>
-        <input type="password" id="password" placeholder="Enter your password" required autofocus>
+        <label for="email">Email</label>
+        <input type="email" id="email" placeholder="you@example.com" required autofocus>
       </div>
 
-      <button type="submit" class="btn-login">Enter</button>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="Enter your password" required>
+      </div>
+
+      <button type="submit" class="btn-login">Enter Vault</button>
       <p id="errorMsg" class="error"></p>
+      <p style="margin-top: 16px; font-size: 13px; color: #9d174d;">
+       
+      </p>
     </form>
   </div>
 
   <script>
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
+      const email = document.getElementById('email').value.trim();
       const password = document.getElementById('password').value;
       const errorMsg = document.getElementById('errorMsg');
 
@@ -33,7 +42,7 @@
         const res = await fetch('/api/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password })
+          body: JSON.stringify({ email, password })
         });
 
         const data = await res.json();
@@ -41,7 +50,7 @@
         if (data.success) {
           window.location.href = '/dashboard.html';
         } else {
-          errorMsg.textContent = data.message || 'Wrong password';
+          errorMsg.textContent = data.message || 'Wrong email or password';
         }
       } catch (err) {
         errorMsg.textContent = 'Something went wrong. Try again.';

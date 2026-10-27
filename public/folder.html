@@ -277,7 +277,6 @@
             ${preview}
             <div class="info">
               <div class="name">${escapeHtml(m.title || m.type)}</div>
-              <div class="time">${new Date(m.created_at).toLocaleString()}</div>
               ${m.type === 'voice' && m.file_path ? `<audio src="${m.file_path}" controls style="width:100%; margin-top:6px;"></audio>` : ''}
               ${m.type === 'text' && m.content ? `<p style="font-size:12px; margin-top:4px;">${escapeHtml(m.content.substring(0, 80))}</p>` : ''}
             </div>
