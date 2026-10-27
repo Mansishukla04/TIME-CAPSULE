@@ -46,10 +46,6 @@
     <main class="main-content">
       <div class="top-bar">
         <h1 id="pageTitle">My Memory Vault</h1>
-        <div class="search-box">
-          <span>🔍</span>
-          <input type="text" id="searchInput" placeholder="Search memories..." oninput="handleSearch()">
-        </div>
       </div>
 
       <!-- HOME SECTION -->
@@ -60,7 +56,7 @@
           </button>
         </div>
 
-        <h2 class="section-title">Recent Folders</h2>
+        <h2 class="section-title">Your Folders</h2>
         <div id="foldersGrid" class="folders-grid"></div>
         <div id="emptyFolders" class="empty-state" style="display: none;">
           <div class="emoji">📁</div>
@@ -68,7 +64,7 @@
         </div>
       </div>
 
-      <!-- ALL / FAVORITES / TRASH SECTIONS -->
+      <!-- ALL / FAVORITES / TRASH -->
       <div id="listSection" style="display: none;">
         <div id="memoriesGrid" class="media-grid"></div>
         <div id="emptyList" class="empty-state" style="display: none;">
@@ -85,7 +81,7 @@
       <h3>Create New Folder</h3>
       <div class="form-group">
         <label>Folder Name</label>
-        <input type="text" id="folderName" placeholder="e.g. 2025-10-01 – College Day">
+        <input type="text" id="folderName" placeholder="e.g. 2025-10-01 College Day">
       </div>
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeCreateModal()">Cancel</button>
@@ -97,7 +93,6 @@
   <script>
     let currentSection = 'home';
 
-    // ========== LOAD FOLDERS ==========
     async function loadFolders() {
       try {
         const res = await fetch('/api/folders');
@@ -119,10 +114,10 @@
         grid.innerHTML = folders.map(f => `
           <div class="folder-card ${f.color || 'purple'}" onclick="openFolder(${f.id}, '${escapeHtml(f.name)}')">
             <div class="actions">
-              <button class="icon-btn" onclick="event.stopPropagation(); toggleFavoriteFolder(${f.id})" title="Favorite">
+              <button class="icon-btn" onclick="event.stopPropagation(); toggleFavoriteFolder(${f.id})">
                 ${f.is_favorite ? '❤️' : '🤍'}
               </button>
-              <button class="icon-btn" onclick="event.stopPropagation(); deleteFolder(${f.id})" title="Delete">🗑️</button>
+              <button class="icon-btn" onclick="event.stopPropagation(); deleteFolder(${f.id})">🗑️</button>
             </div>
             <div class="folder-icon">📁</div>
             <h3>${escapeHtml(f.name)}</h3>
@@ -130,70 +125,53 @@
           </div>
         `).join('');
       } catch (err) {
-        console.error(err);
         window.location.href = '/login.html';
       }
     }
 
-    // ========== LOAD MEMORIES (All / Favorites / Trash) ==========
     async function loadMemoriesList(type) {
       let url = '/api/memories';
       if (type === 'favorites') url += '?favorite=true';
       if (type === 'trash') url += '?deleted=true';
 
-      try {
-        const res = await fetch(url);
-        const memories = await res.json();
-        const grid = document.getElementById('memoriesGrid');
-        const empty = document.getElementById('emptyList');
-        const emptyText = document.getElementById('emptyListText');
+      const res = await fetch(url);
+      const memories = await res.json();
+      const grid = document.getElementById('memoriesGrid');
+      const empty = document.getElementById('emptyList');
+      const emptyText = document.getElementById('emptyListText');
 
-        if (memories.length === 0) {
-          grid.innerHTML = '';
-          empty.style.display = 'block';
-          emptyText.textContent = type === 'trash' ? 'Trash is empty' : 
-                                  type === 'favorites' ? 'No favorites yet' : 'No memories yet';
-          return;
-        }
-
-        empty.style.display = 'none';
-        grid.innerHTML = memories.map(m => renderMemoryCard(m, type === 'trash')).join('');
-      } catch (err) {
-        console.error(err);
-      }
-    }
-
-    function renderMemoryCard(m, isTrash = false) {
-      let preview = '';
-      if (m.type === 'photo' && m.file_path) {
-        preview = `<img class="preview" src="${m.file_path}" alt="">`;
-      } else if (m.type === 'video' && m.file_path) {
-        preview = `<video class="preview" src="${m.file_path}"></video>`;
-      } else if (m.type === 'voice') {
-        preview = `<div class="preview">🎤</div>`;
-      } else {
-        preview = `<div class="preview">📝</div>`;
+      if (memories.length === 0) {
+        grid.innerHTML = '';
+        empty.style.display = 'block';
+        emptyText.textContent = type === 'trash' ? 'Trash is empty' : 
+                                type === 'favorites' ? 'No favorites yet' : 'No memories yet';
+        return;
       }
 
-      return `
-        <div class="media-card">
-          <div class="card-actions">
-            ${isTrash 
-              ? `<button class="icon-btn" onclick="restoreMemory(${m.id})">♻️</button>`
-              : `<button class="icon-btn" onclick="toggleFavoriteMemory(${m.id})">${m.is_favorite ? '❤️' : '🤍'}</button>
-                 <button class="icon-btn" onclick="deleteMemory(${m.id})">🗑️</button>`
-            }
+      empty.style.display = 'none';
+      grid.innerHTML = memories.map(m => {
+        let preview = m.type === 'photo' && m.file_path ? `<img class="preview" src="${m.file_path}">` :
+                      m.type === 'video' && m.file_path ? `<video class="preview" src="${m.file_path}"></video>` :
+                      m.type === 'voice' ? `<div class="preview">🎤</div>` : `<div class="preview">📝</div>`;
+
+        return `
+          <div class="media-card">
+            <div class="card-actions">
+              ${type === 'trash' 
+                ? `<button class="icon-btn" onclick="restoreMemory(${m.id})">♻️</button>`
+                : `<button class="icon-btn" onclick="toggleFavoriteMemory(${m.id})">${m.is_favorite ? '❤️' : '🤍'}</button>
+                   <button class="icon-btn" onclick="deleteMemory(${m.id})">🗑️</button>`}
+            </div>
+            ${preview}
+            <div class="info">
+              <div class="name">${escapeHtml(m.title || m.type)}</div>
+              <div class="time">${new Date(m.created_at).toLocaleDateString()}</div>
+            </div>
           </div>
-          ${preview}
-          <div class="info">
-            <div class="name">${escapeHtml(m.title || m.type)}</div>
-            <div class="time">${new Date(m.created_at).toLocaleDateString()}</div>
-          </div>
-        </div>
-      `;
+        `;
+      }).join('');
     }
 
-    // ========== SECTION SWITCHING ==========
     function showSection(section) {
       currentSection = section;
       document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
@@ -210,14 +188,10 @@
       };
       document.getElementById('pageTitle').textContent = titles[section];
 
-      if (section === 'home') {
-        loadFolders();
-      } else {
-        loadMemoriesList(section);
-      }
+      if (section === 'home') loadFolders();
+      else loadMemoriesList(section);
     }
 
-    // ========== ACTIONS ==========
     function openFolder(id, name) {
       window.location.href = `/folder.html?id=${id}&name=${encodeURIComponent(name)}`;
     }
@@ -239,7 +213,7 @@
       const res = await fetch('/api/folders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, parent_id: null })
+        body: JSON.stringify({ name })
       });
       const data = await res.json();
       if (data.success) {
@@ -282,24 +256,17 @@
 
     function escapeHtml(text) {
       const div = document.createElement('div');
-      div.textContent = text;
+      div.textContent = text || '';
       return div.innerHTML;
     }
 
-    function handleSearch() {
-      // Simple client-side search can be added later
-    }
-
-    // Modal close on outside click
     document.getElementById('createModal').addEventListener('click', e => {
       if (e.target.id === 'createModal') closeCreateModal();
     });
-
     document.getElementById('folderName').addEventListener('keypress', e => {
       if (e.key === 'Enter') createFolder();
     });
 
-    // Init
     loadFolders();
   </script>
 </body>

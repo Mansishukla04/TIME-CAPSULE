@@ -20,15 +20,15 @@
           <span class="icon">🏠</span>
           <span>Home</span>
         </button>
-        <button class="nav-item" onclick="window.location.href='/dashboard.html'">
+        <button class="nav-item" onclick="goHome()">
           <span class="icon">🗂️</span>
           <span>All Memories</span>
         </button>
-        <button class="nav-item" onclick="window.location.href='/dashboard.html'">
+        <button class="nav-item" onclick="goHome()">
           <span class="icon">❤️</span>
           <span>Favorites</span>
         </button>
-        <button class="nav-item" onclick="window.location.href='/dashboard.html'">
+        <button class="nav-item" onclick="goHome()">
           <span class="icon">🗑️</span>
           <span>Trash</span>
         </button>
@@ -45,24 +45,11 @@
     <!-- Main Content -->
     <main class="main-content">
       <div class="folder-header">
-        <button class="back-btn" onclick="goBack()">←</button>
+        <button class="back-btn" onclick="goHome()">←</button>
         <div>
           <h1 id="folderTitle">Folder</h1>
-          <div class="subtitle" id="folderSubtitle">Your memories</div>
+          <div class="subtitle">A collection of moments</div>
         </div>
-      </div>
-
-      <!-- Quick Actions -->
-      <div class="quick-actions">
-        <button class="action-btn primary" onclick="openCreateSubfolderModal()">📁 New Subfolder</button>
-        <button class="action-btn" onclick="document.getElementById('addBox').scrollIntoView({behavior:'smooth'})">➕ Add Memory</button>
-      </div>
-
-      <!-- Subfolders -->
-      <h2 class="section-title">Subfolders</h2>
-      <div id="subfoldersGrid" class="folders-grid"></div>
-      <div id="emptySubfolders" class="empty-state" style="display:none; padding: 20px;">
-        <p>No subfolders yet</p>
       </div>
 
       <!-- Add Memory Box -->
@@ -108,7 +95,7 @@
       </div>
 
       <!-- Tabs -->
-      <div class="tabs" style="margin-top: 10px;">
+      <div class="tabs">
         <button class="tab active" data-type="all" onclick="filterMemories('all')">All</button>
         <button class="tab" data-type="photo" onclick="filterMemories('photo')">Photos</button>
         <button class="tab" data-type="video" onclick="filterMemories('video')">Videos</button>
@@ -125,28 +112,12 @@
     </main>
   </div>
 
-  <!-- Create Subfolder Modal -->
-  <div id="createSubfolderModal" class="modal">
-    <div class="modal-content">
-      <h3>Create Subfolder</h3>
-      <div class="form-group">
-        <label>Subfolder Name</label>
-        <input type="text" id="subfolderName" placeholder="e.g. Trip Photos">
-      </div>
-      <div class="modal-actions">
-        <button class="btn btn-secondary" onclick="closeCreateSubfolderModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="createSubfolder()">Create</button>
-      </div>
-    </div>
-  </div>
-
   <script>
     const urlParams = new URLSearchParams(window.location.search);
     const folderId = urlParams.get('id');
     const folderName = urlParams.get('name') || 'Folder';
 
     document.getElementById('folderTitle').textContent = folderName;
-    document.getElementById('folderSubtitle').textContent = 'A collection of moments';
 
     if (!folderId) window.location.href = '/dashboard.html';
 
@@ -154,7 +125,6 @@
     let recordedBlob = null;
     let mediaRecorder, audioChunks = [], isRecording = false;
 
-    // ========== TYPE CHANGE ==========
     function onTypeChange() {
       const type = document.getElementById('memoryType').value;
       const textSection = document.getElementById('textSection');
@@ -188,7 +158,6 @@
       }
     }
 
-    // ========== VOICE RECORDING ==========
     async function toggleRecording() {
       const btn = document.getElementById('recordBtn');
       const status = document.getElementById('recordingStatus');
@@ -223,7 +192,6 @@
       }
     }
 
-    // ========== SAVE MEMORY ==========
     async function saveMemory() {
       const type = document.getElementById('memoryType').value;
       const title = document.getElementById('memoryTitle').value.trim();
@@ -274,33 +242,6 @@
       }
     }
 
-    // ========== LOAD SUBFOLDERS ==========
-    async function loadSubfolders() {
-      const res = await fetch(`/api/folders?parent_id=${folderId}`);
-      const folders = await res.json();
-      const grid = document.getElementById('subfoldersGrid');
-      const empty = document.getElementById('emptySubfolders');
-
-      if (folders.length === 0) {
-        grid.innerHTML = '';
-        empty.style.display = 'block';
-        return;
-      }
-
-      empty.style.display = 'none';
-      grid.innerHTML = folders.map(f => `
-        <div class="folder-card ${f.color || 'purple'}" onclick="openFolder(${f.id}, '${escapeHtml(f.name)}')">
-          <div class="actions">
-            <button class="icon-btn" onclick="event.stopPropagation(); deleteFolder(${f.id})">🗑️</button>
-          </div>
-          <div class="folder-icon">📁</div>
-          <h3>${escapeHtml(f.name)}</h3>
-          <div class="meta">${new Date(f.created_at).toLocaleDateString()}</div>
-        </div>
-      `).join('');
-    }
-
-    // ========== LOAD MEMORIES ==========
     async function loadMemories() {
       const typeParam = currentFilter === 'all' ? '' : `?type=${currentFilter}`;
       const res = await fetch(`/api/folders/${folderId}/memories${typeParam}`);
@@ -352,43 +293,6 @@
       loadMemories();
     }
 
-    // ========== ACTIONS ==========
-    function openFolder(id, name) {
-      window.location.href = `/folder.html?id=${id}&name=${encodeURIComponent(name)}`;
-    }
-
-    function openCreateSubfolderModal() {
-      document.getElementById('createSubfolderModal').classList.add('show');
-      document.getElementById('subfolderName').value = '';
-      document.getElementById('subfolderName').focus();
-    }
-
-    function closeCreateSubfolderModal() {
-      document.getElementById('createSubfolderModal').classList.remove('show');
-    }
-
-    async function createSubfolder() {
-      const name = document.getElementById('subfolderName').value.trim();
-      if (!name) return alert('Enter a name');
-
-      const res = await fetch('/api/folders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, parent_id: folderId })
-      });
-      const data = await res.json();
-      if (data.success) {
-        closeCreateSubfolderModal();
-        loadSubfolders();
-      }
-    }
-
-    async function deleteFolder(id) {
-      if (!confirm('Move this subfolder to Trash?')) return;
-      await fetch(`/api/folders/${id}`, { method: 'DELETE' });
-      loadSubfolders();
-    }
-
     async function deleteMemory(id) {
       if (!confirm('Move to Trash?')) return;
       await fetch(`/api/memories/${id}`, { method: 'DELETE' });
@@ -398,10 +302,6 @@
     async function toggleFavorite(id) {
       await fetch(`/api/memories/${id}/favorite`, { method: 'POST' });
       loadMemories();
-    }
-
-    function goBack() {
-      window.history.back();
     }
 
     function goHome() {
@@ -419,17 +319,8 @@
       return div.innerHTML;
     }
 
-    // Modal events
-    document.getElementById('createSubfolderModal').addEventListener('click', e => {
-      if (e.target.id === 'createSubfolderModal') closeCreateSubfolderModal();
-    });
-    document.getElementById('subfolderName').addEventListener('keypress', e => {
-      if (e.key === 'Enter') createSubfolder();
-    });
-
     // Init
     onTypeChange();
-    loadSubfolders();
     loadMemories();
   </script>
 </body>

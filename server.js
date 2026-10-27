@@ -8,6 +8,7 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs');
 
 const app = express();
+const PORT = process.env.PORT || 3000;
 
 
 // Create database
@@ -18,12 +19,10 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS folders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    parent_id INTEGER DEFAULT NULL,
     color TEXT DEFAULT 'purple',
     is_favorite INTEGER DEFAULT 0,
     is_deleted INTEGER DEFAULT 0,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS memories (
@@ -39,6 +38,7 @@ db.exec(`
     FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE
   );
 `);
+
 
 // Middleware
 app.use(express.json());
@@ -78,7 +78,8 @@ function requireLogin(req, res, next) {
 
 // ========== ROUTES ==========
 
-// Login page redirect
+// ========== ROUTES ==========
+
 app.get('/', (req, res) => {
   if (req.session.loggedIn) {
     res.redirect('/dashboard.html');
@@ -87,7 +88,7 @@ app.get('/', (req, res) => {
   }
 });
 
-// Login API
+// Login
 app.post('/api/login', (req, res) => {
   const { password } = req.body;
   if (password === process.env.PASSWORD) {
@@ -106,53 +107,40 @@ app.post('/api/logout', (req, res) => {
 
 // ========== FOLDERS ==========
 
-// Get folders
+// Get all folders (only root, no nesting)
 app.get('/api/folders', requireLogin, (req, res) => {
-  const parentId = req.query.parent_id;
   const showDeleted = req.query.deleted === 'true';
-
   let folders;
+
   if (showDeleted) {
     folders = db.prepare('SELECT * FROM folders WHERE is_deleted = 1 ORDER BY created_at DESC').all();
-  } else if (parentId === undefined || parentId === null || parentId === 'null') {
-    folders = db.prepare('SELECT * FROM folders WHERE parent_id IS NULL AND is_deleted = 0 ORDER BY created_at DESC').all();
   } else {
-    folders = db.prepare('SELECT * FROM folders WHERE parent_id = ? AND is_deleted = 0 ORDER BY created_at DESC').all(parentId);
+    folders = db.prepare('SELECT * FROM folders WHERE is_deleted = 0 ORDER BY created_at DESC').all();
   }
   res.json(folders);
 });
 
 // Create folder
 app.post('/api/folders', requireLogin, (req, res) => {
-  const { name, parent_id, color } = req.body;
+  const { name, color } = req.body;
   if (!name || name.trim() === '') {
     return res.json({ success: false, message: 'Folder name required' });
   }
 
   const colors = ['purple', 'pink', 'blue', 'green', 'orange', 'teal'];
-  const randomColor = color || colors[Math.floor(Math.random() * colors.length)];
+  const finalColor = color || colors[Math.floor(Math.random() * colors.length)];
 
-  const result = db.prepare(`
-    INSERT INTO folders (name, parent_id, color) VALUES (?, ?, ?)
-  `).run(name.trim(), parent_id || null, randomColor);
-
+  const result = db.prepare('INSERT INTO folders (name, color) VALUES (?, ?)').run(name.trim(), finalColor);
   res.json({ success: true, id: result.lastInsertRowid });
 });
 
-// Get single folder
-app.get('/api/folders/:id', requireLogin, (req, res) => {
-  const folder = db.prepare('SELECT * FROM folders WHERE id = ?').get(req.params.id);
-  if (!folder) return res.status(404).json({ success: false });
-  res.json(folder);
-});
-
-// Soft delete folder (move to trash)
+// Soft delete folder
 app.delete('/api/folders/:id', requireLogin, (req, res) => {
   db.prepare('UPDATE folders SET is_deleted = 1 WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });
 
-// Restore folder from trash
+// Restore folder
 app.post('/api/folders/:id/restore', requireLogin, (req, res) => {
   db.prepare('UPDATE folders SET is_deleted = 0 WHERE id = ?').run(req.params.id);
   res.json({ success: true });
@@ -170,7 +158,7 @@ app.post('/api/folders/:id/favorite', requireLogin, (req, res) => {
 
 // Get memories of a folder
 app.get('/api/folders/:id/memories', requireLogin, (req, res) => {
-  const type = req.query.type; // photo, video, text, voice
+  const type = req.query.type;
   let memories;
 
   if (type && type !== 'all') {
@@ -230,7 +218,7 @@ app.post('/api/memories/:id/favorite', requireLogin, (req, res) => {
   res.json({ success: true, is_favorite: newValue });
 });
 
-// Get all memories (for All Memories / By Type pages)
+// Get all memories (for All / Favorites / Trash)
 app.get('/api/memories', requireLogin, (req, res) => {
   const type = req.query.type;
   const favorite = req.query.favorite === 'true';
@@ -255,15 +243,11 @@ app.get('/api/memories', requireLogin, (req, res) => {
   }
 
   query += ' ORDER BY m.created_at DESC';
-
   const memories = db.prepare(query).all(...params);
   res.json(memories);
 });
 
 // Start server
-
-const PORT = process.env.PORT || 5000;
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`TIME CAPSULE running on port ${PORT}`);
+app.listen(PORT, () => {
+  console.log(`TIME CAPSULE running at http://localhost:${PORT}`);
 });
